@@ -1,0 +1,20 @@
+node_modules/
+
+# WhatsApp sessions/auth
+.wwebjs_auth/
+.wwebjs_cache/
+auth/
+session/
+sessions/
+
+# Runtime logs
+*.log
+logs/
+
+# Local backups
+*.backup
+*.backup-*
+*.bak
+
+# Temporary/debug files
+/tmp/
