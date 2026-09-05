@@ -84,6 +84,9 @@ echo "[3/6] Checking required project files..."
 [[ -f "$APP_DIR/group-message-control/groups/group_name.txt" ]] || \
     fail "group_name.txt missing."
 
+[[ -f "$APP_DIR/src/config/config.js" ]] || \
+    fail "src/config/config.js missing."
+
 echo "Required files: OK"
 
 echo
