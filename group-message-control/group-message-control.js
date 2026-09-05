@@ -423,142 +423,239 @@ async function setAdminOnly(
                 adminOnly
             ) => {
 
-                try {
+                const sleep = (ms) =>
+                    new Promise(
+                        resolve => setTimeout(resolve, ms)
+                    );
 
-                    const chat =
-                        await window.WWebJS.getChat(
+                const getLiveChat = async () => {
+
+                    try {
+
+                        const wid =
+                            window
+                                .require(
+                                    'WAWebWidFactory'
+                                )
+                                .createWid(
+                                    targetGroupId
+                                );
+
+                        const direct =
+                            window
+                                .require(
+                                    'WAWebCollections'
+                                )
+                                .Chat
+                                .get(wid);
+
+                        if (direct) {
+                            return direct;
+                        }
+
+                    } catch (_) {}
+
+                    try {
+
+                        return await window.WWebJS.getChat(
                             targetGroupId,
                             {
                                 getAsModel: false
                             }
                         );
 
-                    if (!chat) {
-
-                        return {
-                            success: false,
-                            diagnostic: {
-                                stage: 'GET_CHAT',
-                                name: 'ChatNotFound',
-                                message:
-                                    `WhatsApp chat not found: ${targetGroupId}`,
-                                stack: null,
-                                constructor: null
-                            }
-                        };
-                    }
-
-                    try {
-
-                        await window
-                            .require(
-                                'WAWebSetPropertyGroupAction'
-                            )
-                            .setGroupProperty(
-                                chat,
-                                'announcement',
-                                adminOnly ? 1 : 0
-                            );
-
-                        return {
-                            success: true,
-                            reason: null,
-                            diagnostic: null
-                        };
-
-                    } catch (error) {
-
-                        let name = null;
-                        let message = null;
-                        let stack = null;
-                        let constructor = null;
-
-                        try {
-                            name = error?.name ?? null;
-                        } catch (_) {}
-
-                        try {
-                            message = error?.message ?? String(error);
-                        } catch (_) {
-                            message = String(error);
-                        }
-
-                        try {
-                            stack = error?.stack ?? null;
-                        } catch (_) {}
-
-                        try {
-                            constructor =
-                                error?.constructor?.name ?? null;
-                        } catch (_) {}
-
-                        if (
-                            name ===
-                            'ServerStatusCodeError'
-                        ) {
-
-                            return {
-                                success: false,
-                                reason:
-                                    'ServerStatusCodeError',
-                                diagnostic: {
-                                    stage: 'SET_GROUP_PROPERTY',
-                                    name,
-                                    message,
-                                    stack,
-                                    constructor
-                                }
-                            };
-                        }
-
-                        return {
-                            success: false,
-                            reason: 'WHATSAPP_INTERNAL_ERROR',
-                            diagnostic: {
-                                stage: 'SET_GROUP_PROPERTY',
-                                name,
-                                message,
-                                stack,
-                                constructor
-                            }
-                        };
-                    }
-
-                } catch (error) {
-
-                    let name = null;
-                    let message = null;
-                    let stack = null;
-                    let constructor = null;
-
-                    try {
-                        name = error?.name ?? null;
                     } catch (_) {}
 
-                    try {
-                        message = error?.message ?? String(error);
-                    } catch (_) {
-                        message = String(error);
-                    }
+                    return null;
+                };
 
-                    try {
-                        stack = error?.stack ?? null;
-                    } catch (_) {}
 
-                    try {
-                        constructor =
-                            error?.constructor?.name ?? null;
-                    } catch (_) {}
+                let chat = await getLiveChat();
+
+                if (!chat) {
 
                     return {
                         success: false,
-                        reason: 'BROWSER_CONTEXT_ERROR',
+                        reason: 'CHAT_NOT_FOUND'
+                    };
+                }
+
+
+                /*
+                 * WhatsApp Web can emit READY before the group's
+                 * participant collection is populated.
+                 *
+                 * The group-setting permission check internally uses:
+                 *
+                 *     groupMetadata.participants.iAmAdmin()
+                 *
+                 * Therefore we must wait until the live model reports
+                 * both a populated participant collection and admin status.
+                 */
+                let participantCount = 0;
+                let participantModels = 0;
+                let iAmAdmin = false;
+                let modelReady = false;
+
+                for (
+                    let attempt = 1;
+                    attempt <= 90;
+                    attempt++
+                ) {
+
+                    try {
+
+                        if (
+                            typeof chat.waitForChatLoading ===
+                            'function'
+                        ) {
+                            await chat.waitForChatLoading();
+                        }
+
+                    } catch (_) {}
+
+
+                    try {
+
+                        participantCount =
+                            typeof chat.getParticipantCount ===
+                            'function'
+                                ? chat.getParticipantCount()
+                                : 0;
+
+                    } catch (_) {
+                        participantCount = 0;
+                    }
+
+
+                    try {
+
+                        participantModels =
+                            chat
+                                ?.groupMetadata
+                                ?.participants
+                                ?.getModelsArray
+                                ?.()
+                                ?.length ?? 0;
+
+                    } catch (_) {
+                        participantModels = 0;
+                    }
+
+
+                    try {
+
+                        iAmAdmin =
+                            typeof chat.iAmAdmin ===
+                            'function'
+                                ? chat.iAmAdmin()
+                                : false;
+
+                    } catch (_) {
+                        iAmAdmin = false;
+                    }
+
+
+                    if (
+                        participantCount > 0 &&
+                        participantModels > 0 &&
+                        iAmAdmin === true
+                    ) {
+                        modelReady = true;
+                        break;
+                    }
+
+
+                    /*
+                     * Reacquire the current live Chat model.
+                     * WhatsApp may hydrate a different model instance
+                     * after the initial READY event.
+                     */
+                    try {
+
+                        const wid =
+                            window
+                                .require(
+                                    'WAWebWidFactory'
+                                )
+                                .createWid(
+                                    targetGroupId
+                                );
+
+                        const refreshed =
+                            window
+                                .require(
+                                    'WAWebCollections'
+                                )
+                                .Chat
+                                .get(wid);
+
+                        if (refreshed) {
+                            chat = refreshed;
+                        }
+
+                    } catch (_) {}
+
+
+                    await sleep(1000);
+                }
+
+
+                if (!modelReady) {
+
+                    return {
+                        success: false,
+                        reason: 'GROUP_MODEL_NOT_READY',
                         diagnostic: {
-                            stage: 'BROWSER_CONTEXT',
-                            name,
-                            message,
-                            stack,
-                            constructor
+                            participantCount,
+                            participantModels,
+                            iAmAdmin
+                        }
+                    };
+                }
+
+
+                try {
+
+                    await window
+                        .require(
+                            'WAWebSetPropertyGroupAction'
+                        )
+                        .setGroupProperty(
+                            chat,
+                            'announcement',
+                            adminOnly ? 1 : 0
+                        );
+
+                    return {
+                        success: true,
+                        reason: null
+                    };
+
+                } catch (error) {
+
+                    return {
+                        success: false,
+                        reason:
+                            error?.name ===
+                            'ServerStatusCodeError'
+                                ? 'ServerStatusCodeError'
+                                : 'WHATSAPP_INTERNAL_ERROR',
+
+                        diagnostic: {
+                            stage:
+                                'SET_GROUP_PROPERTY',
+                            name:
+                                error?.name ??
+                                null,
+                            message:
+                                error?.message ??
+                                String(error),
+                            constructor:
+                                error
+                                    ?.constructor
+                                    ?.name ??
+                                null
                         }
                     };
                 }
@@ -575,19 +672,19 @@ async function setAdminOnly(
     ) {
 
         log(
-            `ADMIN ONLY DIAGNOSTIC | ${groupName} | ${
-                result?.reason || 'UNKNOWN'
-            } | ${
+            `ADMIN ONLY FAILURE | ${groupName} | ${
+                result?.reason ||
+                'UNKNOWN'
+            }${
                 result?.diagnostic
-                    ? JSON.stringify(result.diagnostic)
-                    : 'NO_DIAGNOSTIC'
+                    ? ` | ${JSON.stringify(result.diagnostic)}`
+                    : ''
             }`
         );
 
         throw new Error(
             `Failed to change admin-only setting: ${groupName}${
-                result &&
-                result.reason
+                result?.reason
                     ? ` | ${result.reason}`
                     : ''
             }`
